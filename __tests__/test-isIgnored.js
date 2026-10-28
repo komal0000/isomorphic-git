@@ -103,4 +103,62 @@ describe('isIgnored', () => {
       false
     )
   })
+  it('should let a nested .gitignore re-include a directory ignored by a parent .gitignore', async () => {
+    // Setup
+    const { fs, gitdir, dir } = await makeFixture('test-isIgnored')
+    await writeGitIgnore(fs, dir, ['publish/'])
+    await writeGitIgnore(fs, dir + '/.ci', ['!**'])
+    // Test
+    expect(
+      await isIgnored({ fs, gitdir, dir, filepath: 'publish/file.txt' })
+    ).toBe(true)
+    expect(
+      await isIgnored({ fs, gitdir, dir, filepath: '.ci/publish/file.txt' })
+    ).toBe(false)
+    expect(
+      await isIgnored({ fs, gitdir, dir, filepath: '.ci/publish/sub/file.txt' })
+    ).toBe(false)
+  })
+  it('should let a nested .gitignore re-include a directory ignored by .git/info/exclude', async () => {
+    // Setup
+    const { fs, gitdir, dir } = await makeFixture('test-isIgnored')
+    await writeExclude(fs, gitdir, ['publish/'])
+    await writeGitIgnore(fs, dir + '/.ci', ['!**'])
+    // Test
+    expect(
+      await isIgnored({ fs, gitdir, dir, filepath: 'publish/file.txt' })
+    ).toBe(true)
+    expect(
+      await isIgnored({ fs, gitdir, dir, filepath: '.ci/publish/file.txt' })
+    ).toBe(false)
+    expect(
+      await isIgnored({ fs, gitdir, dir, filepath: '.ci/publish/sub/file.txt' })
+    ).toBe(false)
+  })
+  it('should not read the .gitignore of an excluded directory', async () => {
+    // Setup
+    const { fs, gitdir, dir } = await makeFixture('test-isIgnored')
+    await writeGitIgnore(fs, dir, ['publish/', '.ci/'])
+    await writeGitIgnore(fs, dir + '/.ci', ['!**'])
+    // Test
+    expect(
+      await isIgnored({ fs, gitdir, dir, filepath: '.ci/publish/file.txt' })
+    ).toBe(true)
+    expect(
+      await isIgnored({ fs, gitdir, dir, filepath: '.ci/publish/sub/file.txt' })
+    ).toBe(true)
+  })
+  it('should not re-include files from inside an excluded directory', async () => {
+    // Setup
+    const { fs, gitdir, dir } = await makeFixture('test-isIgnored')
+    await writeGitIgnore(fs, dir, ['publish/'])
+    await writeGitIgnore(fs, dir + '/.ci/publish', ['!**'])
+    // Test
+    expect(
+      await isIgnored({ fs, gitdir, dir, filepath: '.ci/publish/file.txt' })
+    ).toBe(true)
+    expect(
+      await isIgnored({ fs, gitdir, dir, filepath: '.ci/publish/sub/file.txt' })
+    ).toBe(true)
+  })
 })

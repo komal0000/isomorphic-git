@@ -3,7 +3,6 @@ import '../typedefs.js'
 import ignore from 'ignore'
 
 import { basename } from '../utils/basename.js'
-import { dirname } from '../utils/dirname.js'
 import { join } from '../utils/join.js'
 
 // I'm putting this in a Manager because I reckon it could benefit
@@ -30,42 +29,39 @@ export class GitIgnoreManager {
     if (await fs.exists(excludesFile)) {
       excludes = await fs.read(excludesFile, 'utf8')
     }
-    // Find all the .gitignore files that could affect this file
-    const pairs = [
-      {
-        gitignore: join(dir, '.gitignore'),
-        filepath,
-      },
-    ]
+    // Walk down the path one directory at a time, like git does. Each step
+    // loads the .gitignore of the folder being entered, then checks the path so
+    // far against every .gitignore loaded so far, so deeper files can negate
+    // rules from shallower ones.
     const pieces = filepath.split('/').filter(Boolean)
-    for (let i = 1; i < pieces.length; i++) {
+    const matchers = []
+    for (let i = 0; i < pieces.length; i++) {
       const folder = pieces.slice(0, i).join('/')
-      const file = pieces.slice(i).join('/')
-      pairs.push({
-        gitignore: join(dir, folder, '.gitignore'),
-        filepath: file,
-      })
-    }
-    let ignoredStatus = false
-    for (const [index, p] of pairs.entries()) {
-      const file = await fs.read(p.gitignore, 'utf8')
       const ign = ignore()
       // The patterns in .git/info/exclude are relative to the working directory,
-      // so only the first pair, which holds the full filepath, can use them.
-      if (index === 0) ign.add(excludes)
-      ign.add(file)
-      // If the parent directory is excluded, we are done.
+      // so only the root .gitignore matcher can use them.
+      if (i === 0) ign.add(excludes)
+      ign.add(await fs.read(join(dir, folder, '.gitignore'), 'utf8'))
+      matchers.push(ign)
+      const isParentDir = i < pieces.length - 1
+      // Directories need a trailing slash to match patterns like `build/`.
+      const suffix = isParentDir || filepath.endsWith('/') ? '/' : ''
+      let ignoredStatus = false
+      for (const [j, m] of matchers.entries()) {
+        const relpath = pieces.slice(j, i + 1).join('/') + suffix
+        // If the path is currently ignored, test for UNignoring.
+        if (ignoredStatus) {
+          ignoredStatus = !m.test(relpath).unignored
+        } else {
+          ignoredStatus = m.test(relpath).ignored
+        }
+      }
+      // If a parent directory is excluded, we are done.
       // "It is not possible to re-include a file if a parent directory of that file is excluded. Git doesn’t list excluded directories for performance reasons, so any patterns on contained files have no effect, no matter where they are defined."
       // source: https://git-scm.com/docs/gitignore
-      const parentdir = dirname(p.filepath)
-      if (parentdir !== '.' && ign.ignores(parentdir)) return true
-      // If the file is currently ignored, test for UNignoring.
-      if (ignoredStatus) {
-        ignoredStatus = !ign.test(p.filepath).unignored
-      } else {
-        ignoredStatus = ign.test(p.filepath).ignored
-      }
+      if (isParentDir && ignoredStatus) return true
+      if (!isParentDir) return ignoredStatus
     }
-    return ignoredStatus
+    return false
   }
 }
