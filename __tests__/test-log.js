@@ -1080,4 +1080,37 @@ dGs=
       'Alice first',
     ])
   })
+
+  it('lists a shared ancestor of a merge once', async () => {
+    const { fs, dir } = await makeFixture('test-init')
+    // Identical timestamps leave only the walk order to decide the result.
+    const author = {
+      name: 'Mr. Test',
+      email: 'mrtest@example.com',
+      timestamp: 1700000000,
+      timezoneOffset: 0,
+    }
+    const tree = await writeTree({ fs, dir, tree: [] })
+    const makeCommit = (message, parent) =>
+      writeCommit({
+        fs,
+        dir,
+        commit: { message, tree, parent, author, committer: author },
+      })
+    const a = await makeCommit('A\n', [])
+    const b = await makeCommit('B\n', [a])
+    const c = await makeCommit('C\n', [a])
+    const m = await makeCommit('M\n', [b, c])
+    await writeRef({ fs, dir, ref: 'refs/heads/main', value: m, force: true })
+
+    const commits = await log({ fs, dir, ref: 'main' })
+
+    // Same order as `git log --format=%s main`.
+    expect(commits.map(({ commit }) => commit.message.trim())).toEqual([
+      'M',
+      'B',
+      'C',
+      'A',
+    ])
+  })
 })
